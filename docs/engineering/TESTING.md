@@ -19,6 +19,14 @@ docker compose -p temuka-test -f compose.test.yaml run --rm -T test-runner compo
 docker compose -p temuka-test -f compose.test.yaml down --remove-orphans
 ```
 
+For focused M2 checks and M1 regression coverage, use:
+
+```bash
+docker compose -p temuka-test -f compose.test.yaml run --rm -T test-runner php artisan test tests/Unit/NormalizeExampleValueTest.php
+docker compose -p temuka-test -f compose.test.yaml run --rm -T test-runner php artisan test tests/Feature/NormalizeExampleApiTest.php
+docker compose -p temuka-test -f compose.test.yaml run --rm -T test-runner php artisan test --filter='HealthEndpointTest|ApiErrorResponseTest|TestDatabaseConnectionTest|TestDatabaseSafetyTest'
+```
+
 The MySQL health check gates the test runner without a fixed sleep. Before
 PHPUnit test traits can run migrations, the Laravel test case verifies
 `APP_ENV`, the MySQL connection, exact service hostname, port, database name,
@@ -35,6 +43,19 @@ was rejected before a `migrate --pretend` command could connect or execute.
 `temuka_test` instance. The test database container has no named or bind
 volume; removing the test project discards it. Teardown is scoped by both the
 project name and Compose file and deliberately omits `-v`.
+
+The engineering reference endpoint is enabled only when `app.env` is `local`
+or `testing`; its feature test sets `production` in application configuration
+and confirms a JSON `404` without contacting a production service. To inspect
+the development routes and make an HTTP request against the local API, use:
+
+```bash
+docker compose --env-file .env -p temuka-dev exec -T app php artisan route:list --path=api/v1
+docker compose --env-file .env -p temuka-dev exec -T app php -r '$payload=json_encode(["value"=>"  Temuka    Marketplace  "]); $context=stream_context_create(["http"=>["method"=>"POST","header"=>"Content-Type: application/json\r\nAccept: application/json\r\n","content"=>$payload,"ignore_errors"=>true]]); $response=file_get_contents("http://127.0.0.1:8000/api/v1/examples/normalize", false, $context); echo $http_response_header[0], PHP_EOL, $response, PHP_EOL;'
+```
+
+This local HTTP check is separate from PHPUnit and uses the development app
+only. It does not run migrations or access production credentials.
 
 If Docker is unavailable or approval is denied, mark verification BLOCKED.
 Never fall back to host PHP/Composer or run test commands using the development

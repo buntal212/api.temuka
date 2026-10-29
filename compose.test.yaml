@@ -1,0 +1,54 @@
+name: temuka-test
+
+services:
+  test-db:
+    image: mysql:8.0.40
+    tmpfs:
+      - /var/lib/mysql
+    environment:
+      MYSQL_DATABASE: temuka_test
+      MYSQL_USER: temuka_test
+      MYSQL_PASSWORD: temuka-test-only-password
+      MYSQL_ROOT_PASSWORD: temuka-test-root-only-password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping --protocol=tcp -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TEMUKA_UID: 1000
+        TEMUKA_GID: 1000
+    working_dir: /var/www/html
+    user: temuka
+    entrypoint: ["/bin/sh", "/var/www/html/docker/test-entrypoint.sh"]
+    volumes:
+      - .:/var/www/html
+    environment:
+      APP_NAME: Temuka
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_KEY: base64:dGVtdWthLXRlc3Rpbmcta2V5LW9ubHktMzJieXRlIQ==
+      APP_URL: http://localhost
+      DB_CONNECTION: mysql
+      DB_HOST: test-db
+      DB_PORT: "3306"
+      DB_DATABASE: temuka_test
+      DB_USERNAME: temuka_test
+      DB_PASSWORD: temuka-test-only-password
+      DB_URL: ""
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+      BCRYPT_ROUNDS: "4"
+    depends_on:
+      test-db:
+        condition: service_healthy

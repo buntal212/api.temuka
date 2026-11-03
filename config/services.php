@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'uih' => [
+        'base_url' => env('UIH_BASE_URL', 'http://127.0.0.1:8011'),
+        'server_token' => env('UIH_SERVER_TOKEN', 'uih-dev-internal-token'),
+        'timeout' => (float) env('UIH_SEARCH_TIMEOUT_SECONDS', 10.0),
+    ],
+
 ];

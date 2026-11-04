@@ -32,6 +32,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the ignored .env file}
       DB_URL: ""
       COMPOSER_HOME: /tmp/composer
+      UIH_BASE_URL: ${UIH_BASE_URL:-http://uih-dev-app:8000}
+      UIH_SERVER_TOKEN: ${UIH_SERVER_TOKEN:-uih-dev-internal-token}
     command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
     healthcheck:
       test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8000/api/v1/health') === false ? 1 : 0);"]
@@ -42,6 +44,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      default:
+      temuka-uih-network:
+        aliases:
+          - temuka-dev-app
+          - temuka-api
 
   db:
     image: mysql:8.0.40
@@ -63,3 +71,9 @@ services:
 
 volumes:
   temuka-mysql-data:
+
+networks:
+  default:
+  temuka-uih-network:
+    name: temuka-uih-network
+    external: true

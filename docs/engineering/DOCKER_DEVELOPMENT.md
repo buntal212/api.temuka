@@ -10,6 +10,7 @@ binds to loopback on `TEMUKA_API_PORT` (default `8020`).
 From the backend directory:
 
 ```bash
+docker network create temuka-uih-network 2>/dev/null || true
 cp .env.example .env
 ```
 
@@ -50,7 +51,22 @@ changed without touching other projects.
 
 The Compose project name scopes the network and named volume; it is a collision
 avoidance measure, not a Docker security boundary. Never run `down -v` against
-an unverified project. Docker commands may require normal Codex approval in
+an unverified project.
+
+## UIH internal integration
+
+Temuka Backend communicates with UIH Backend over the shared Docker bridge network
+`temuka-uih-network`. In `.env`:
+
+```ini
+UIH_BASE_URL=http://uih-dev-app:8000
+UIH_SERVER_TOKEN=uih-dev-internal-token
+```
+
+The browser accesses Temuka Backend on host port `8020` (`http://localhost:8020`).
+Temuka Backend proxies catalog search requests internally to `http://uih-dev-app:8000`.
+
+Docker commands may require normal Codex approval in
 this environment. If access is denied, report BLOCKED; do not use host PHP or
 Composer, alter socket permissions, or change global approval settings.
 

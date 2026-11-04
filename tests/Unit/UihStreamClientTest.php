@@ -7,10 +7,36 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
+use Illuminate\Config\Repository;
+use Illuminate\Container\Container;
 use PHPUnit\Framework\TestCase;
 
 class UihStreamClientTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $container = new Container;
+        Container::setInstance($container);
+        $container->instance('config', new Repository([
+            'services' => [
+                'uih' => [
+                    'base_url' => 'http://uih-dev-app:8000',
+                    'server_token' => 'test-s2s-token',
+                    'timeout' => 10.0,
+                ],
+            ],
+        ]));
+    }
+
+    protected function tearDown(): void
+    {
+        Container::setInstance(null);
+
+        parent::tearDown();
+    }
+
     public function test_streams_chunks_incrementally(): void
     {
         $mockStreamData = "event: search_init\ndata: {\"search_id\":\"s1\"}\n\nevent: search_done\ndata: {\"search_id\":\"s1\"}\n\n";
@@ -20,7 +46,7 @@ class UihStreamClientTest extends TestCase
         ]);
 
         $handlerStack = HandlerStack::create($mock);
-        $client = new Client(['handler' => $handlerStack]);
+        $client = new Client(['handler' => $handlerStack, 'http_errors' => false]);
 
         $uihClient = new UihStreamClient($client);
 
@@ -42,7 +68,7 @@ class UihStreamClientTest extends TestCase
         ]);
 
         $handlerStack = HandlerStack::create($mock);
-        $client = new Client(['handler' => $handlerStack]);
+        $client = new Client(['handler' => $handlerStack, 'http_errors' => false]);
 
         $uihClient = new UihStreamClient($client);
 

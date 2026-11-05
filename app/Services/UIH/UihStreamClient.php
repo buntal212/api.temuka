@@ -84,13 +84,24 @@ class UihStreamClient
                 }
             }
         } catch (Throwable $e) {
-            if (class_exists(Log::class) && Facade::getFacadeApplication() !== null) {
-                Log::warning('Failed to connect to UIH Gateway', [
-                    'correlation_id' => $correlationId,
-                    'search_id' => $searchId,
-                    'exception' => $e::class,
-                    'message' => $e->getMessage(),
-                ]);
+            try {
+                if (class_exists(Log::class) && Facade::getFacadeApplication() !== null) {
+                    $safeMessage = $e->getMessage();
+                    if ($token !== '') {
+                        $safeMessage = str_replace($token, '[REDACTED]', $safeMessage);
+                    }
+                    $safeMessage = (string) preg_replace('/Bearer\s+[^\s]+/i', 'Bearer [REDACTED]', $safeMessage);
+                    $safeMessage = (string) preg_replace('/(token|secret|password|key)=([^&\s]+)/i', '$1=[REDACTED]', $safeMessage);
+
+                    Log::warning('Failed to connect to UIH Gateway', [
+                        'correlation_id' => $correlationId,
+                        'search_id' => $searchId,
+                        'exception' => $e::class,
+                        'message' => $safeMessage,
+                    ]);
+                }
+            } catch (Throwable) {
+                // Ensure logging issues never disrupt error event emission
             }
 
             $errorPayload = json_encode([

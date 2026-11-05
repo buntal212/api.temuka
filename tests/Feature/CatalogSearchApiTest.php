@@ -167,4 +167,37 @@ class CatalogSearchApiTest extends TestCase
 
         $this->assertSame($capturedCid, $response->headers->get('X-Correlation-ID'));
     }
+
+    public function test_generates_and_forwards_new_uuid_when_correlation_id_header_absent(): void
+    {
+        $capturedCid = null;
+        $mockUihClient = Mockery::mock(UihStreamClient::class);
+        $mockUihClient->shouldReceive('streamSearch')
+            ->once()
+            ->with('s_cid_absent', 'nasi', 20, Mockery::on(function ($cid) use (&$capturedCid) {
+                $capturedCid = $cid;
+
+                return is_string($cid) && Str::isUuid($cid);
+            }), Mockery::type('callable'));
+        $this->app->instance(UihStreamClient::class, $mockUihClient);
+
+        // Header X-Correlation-ID is deliberately NOT provided
+        $response = $this->postJson('/api/v1/catalog/search', [
+            'search_id' => 's_cid_absent',
+            'query' => 'nasi',
+        ]);
+
+        $response->assertStatus(200);
+        $responseCid = $response->headers->get('X-Correlation-ID');
+        $this->assertNotEmpty($responseCid);
+        $this->assertTrue(Str::isUuid((string) $responseCid));
+
+        $initialBufferLevel = ob_get_level();
+        $response->sendContent();
+        while (ob_get_level() < $initialBufferLevel) {
+            ob_start();
+        }
+
+        $this->assertSame($capturedCid, $responseCid);
+    }
 }

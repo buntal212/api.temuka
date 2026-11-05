@@ -11,7 +11,10 @@ use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
+use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Psr\Log\LoggerTrait;
 
 class UihStreamClientTest extends TestCase
 {
@@ -21,6 +24,7 @@ class UihStreamClientTest extends TestCase
 
         $container = new Container;
         Container::setInstance($container);
+        Facade::setFacadeApplication($container);
         $container->instance('config', new Repository([
             'services' => [
                 'uih' => [
@@ -34,6 +38,8 @@ class UihStreamClientTest extends TestCase
 
     protected function tearDown(): void
     {
+        Facade::clearResolvedInstances();
+        Facade::setFacadeApplication(null);
         Container::setInstance(null);
 
         parent::tearDown();
@@ -132,5 +138,60 @@ class UihStreamClientTest extends TestCase
         $this->assertStringNotContainsString($sensitiveHost, $fullOutput);
         $this->assertStringNotContainsString($sensitivePath, $fullOutput);
         $this->assertStringContainsString('event: search_done', $fullOutput);
+    }
+
+    public function test_does_not_leak_bearer_token_or_secret_in_logs_when_exception_occurs(): void
+    {
+        $secretToken = 'my-super-secret-uih-token-12345';
+        $container = Container::getInstance();
+        $container->instance('config', new Repository([
+            'services' => [
+                'uih' => [
+                    'base_url' => 'http://uih-dev-app:8000',
+                    'server_token' => $secretToken,
+                    'timeout' => 10.0,
+                ],
+            ],
+        ]));
+
+        $mockLogger = new class implements LoggerInterface
+        {
+            use LoggerTrait;
+
+            public array $logs = [];
+
+            public function log($level, \Stringable|string $message, array $context = []): void
+            {
+                $this->logs[] = ['level' => $level, 'message' => (string) $message, 'context' => $context];
+            }
+        };
+        $container->instance('log', $mockLogger);
+
+        $mock = new MockHandler([
+            new ConnectException(
+                "cURL error 7: Failed request with Authorization: Bearer {$secretToken}",
+                new Request('POST', '/api/v1/catalog/search')
+            ),
+        ]);
+
+        $handlerStack = HandlerStack::create($mock);
+        $client = new Client(['handler' => $handlerStack, 'http_errors' => false]);
+
+        $uihClient = new UihStreamClient($client);
+
+        $receivedChunks = [];
+        $uihClient->streamSearch('s_sec', 'nasi', 10, 'cid-sec-test', function (string $chunk) use (&$receivedChunks): void {
+            $receivedChunks[] = $chunk;
+        });
+
+        // 1. SSE event does not leak token
+        $fullOutput = implode('', $receivedChunks);
+        $this->assertStringNotContainsString($secretToken, $fullOutput);
+
+        // 2. Server logs do not leak token
+        $this->assertNotEmpty($mockLogger->logs);
+        $logJson = (string) json_encode($mockLogger->logs);
+        $this->assertStringNotContainsString($secretToken, $logJson);
+        $this->assertStringContainsString('Bearer [REDACTED]', $logJson);
     }
 }

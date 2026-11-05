@@ -45,7 +45,36 @@ Berdasarkan dokumen rencana induk di UIH ([`REAL_ASU_INTEGRATION_FOUNDATION_PLAN
 
 ---
 
-## 3. Pengelolaan Dokumentasi
+## 3. Keputusan Arsitektur & Spesifikasi Fase 4
+
+### A. Penyelarasan Batas Limit
+- Batas maksimal pencarian katalog (`limit`) diselaraskan secara konsisten antara Temuka Backend dan UIH Gateway:
+  - Nilai minimal: `1`
+  - Nilai maksimal: `50` (sebelumnya `100` di Temuka)
+  - Nilai default: `20`
+- Permintaan dengan nilai `limit` > 50 atau < 1 ditolak dengan status HTTP `422 Unprocessable Content`.
+
+### B. Correlation ID & Distributed Tracing
+- `X-Correlation-ID` digunakan untuk distributed tracing lintas service (`Temuka Web → Temuka Backend → UIH Gateway → ASU`).
+- Temuka menerima `X-Correlation-ID` dari header request (bila disediakan caller).
+- Format divalidasi sebagai UUID valid (`Str::isUuid`). Apabila kosong, tidak ada, atau tidak valid, Temuka membangkitkan UUID baru secara otomatis (`Str::uuid()`).
+- Header `X-Correlation-ID` diteruskan dari Temuka ke UIH melalui `UihStreamClient` dan dikembalikan pada response header SSE Temuka (`X-Correlation-ID: <uuid>`).
+- Nilai `search_id` dan `correlation_id` tetap entitas terpisah: `search_id` mengidentifikasi query/sesi pencarian, sedangkan `correlation_id` untuk distributed tracing.
+
+### C. Keamanan Log & Error Handling
+- Pada saat terjadi kegagalan jaringan atau timeout saat menghubungkan ke UIH Gateway, exception detail (seperti internal host, port, atau rute internal) dicatat ke log server terstruktur (`Log::warning`) beserta `correlation_id` dan `search_id`.
+- Pesan kesalahan pada payload SSE (`GATEWAY_CONNECTION_ERROR`) menggunakan pesan aman yang ramah pengguna (`Tidak dapat terhubung ke UIH Gateway.`) dan tidak membocorkan detail internal atau kredensial rahasia.
+
+### D. Keputusan Arsitektur Pagination
+- **Tanggung Jawab UIH:** UIH bertindak sebagai pengelola pagination dan agregasi data dari masing-masing ASU.
+- **Model Inkremental SSE:** SSE mengalirkan hasil per-sumber (`source_result`) secara inkremental dan progresif, bukan berbasis pagination global atau offset ranking.
+- **Urutan Kedatangan (Arrival Order):** Frontend menampilkan produk sesuai urutan kedatangan stream dari ASU tercepat; tidak ada global ranking lintas ASU yang menunda streaming.
+- **Status Kelanjutan (`has_more`):** Status kelanjutan pencarian atau ketersediaan data lebih lanjut ditentukan dan dikontrol oleh UIH, bukan oleh Temuka.
+- **Larangan Scope Fase 4:** Tidak menambahkan event atau field pagination baru pada SSE stream pada fase ini; perubahan tersebut dialokasikan pada fase terpisah setelah kontrak ASU nyata disepakati.
+
+---
+
+## 4. Pengelolaan Dokumentasi
 
 Dokumentasi spesifik Temuka Backend (konvensi coding, pengujian, panduan Docker, dan arsitektur internal) tetap dikelola secara mandiri di dalam direktori `docs/` repositori ini:
 - Panduan Alur Kerja Agent: [`docs/engineering/AGENT_WORKFLOW.md`](../engineering/AGENT_WORKFLOW.md)

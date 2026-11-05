@@ -4,6 +4,8 @@ namespace App\Services\UIH;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use Illuminate\Support\Facades\Facade;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class UihStreamClient
@@ -24,20 +26,26 @@ class UihStreamClient
     /**
      * Stream catalog search results from UIH incrementally.
      *
-     * @param callable(string $chunk): void $onChunk
+     * @param  callable(string $chunk): void  $onChunk
      */
-    public function streamSearch(string $searchId, string $query, int $limit, callable $onChunk): void
+    public function streamSearch(string $searchId, string $query, int $limit, ?string $correlationId, callable $onChunk): void
     {
         $token = (string) config('services.uih.server_token', 'uih-dev-internal-token');
+
+        $headers = [
+            'Accept' => 'text/event-stream',
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer '.$token,
+        ];
+
+        if (! empty($correlationId)) {
+            $headers['X-Correlation-ID'] = $correlationId;
+        }
 
         try {
             $response = $this->client->request('POST', '/api/v1/catalog/search', [
                 'stream' => true,
-                'headers' => [
-                    'Accept' => 'text/event-stream',
-                    'Content-Type' => 'application/json',
-                    'Authorization' => 'Bearer ' . $token,
-                ],
+                'headers' => $headers,
                 'json' => [
                     'search_id' => $searchId,
                     'query' => $query,
@@ -52,7 +60,7 @@ class UihStreamClient
                     'search_id' => $searchId,
                     'source' => 'uih_gateway',
                     'status' => 'failed',
-                    'error_code' => 'GATEWAY_HTTP_' . $statusCode,
+                    'error_code' => 'GATEWAY_HTTP_'.$statusCode,
                     'message' => 'UIH Gateway mengembalikan respon kesalahan.',
                 ], JSON_UNESCAPED_SLASHES);
 
@@ -76,12 +84,21 @@ class UihStreamClient
                 }
             }
         } catch (Throwable $e) {
+            if (class_exists(Log::class) && Facade::getFacadeApplication() !== null) {
+                Log::warning('Failed to connect to UIH Gateway', [
+                    'correlation_id' => $correlationId,
+                    'search_id' => $searchId,
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+
             $errorPayload = json_encode([
                 'search_id' => $searchId,
                 'source' => 'uih_gateway',
                 'status' => 'failed',
                 'error_code' => 'GATEWAY_CONNECTION_ERROR',
-                'message' => 'Tidak dapat terhubung ke UIH Gateway: ' . $e->getMessage(),
+                'message' => 'Tidak dapat terhubung ke UIH Gateway.',
             ], JSON_UNESCAPED_SLASHES);
 
             $donePayload = json_encode([

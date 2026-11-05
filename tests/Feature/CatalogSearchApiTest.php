@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\UIH\UihStreamClient;
+use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
 
@@ -34,8 +35,8 @@ class CatalogSearchApiTest extends TestCase
         $mockUihClient = Mockery::mock(UihStreamClient::class);
         $mockUihClient->shouldReceive('streamSearch')
             ->once()
-            ->with('s1', 'nasi', 20, Mockery::type('callable'))
-            ->andReturnUsing(function ($sId, $q, $l, $callback) use (&$content) {
+            ->with('s1', 'nasi', 20, Mockery::on(fn ($cid) => is_string($cid) && Str::isUuid($cid)), Mockery::type('callable'))
+            ->andReturnUsing(function ($sId, $q, $l, $cid, $callback) use (&$content) {
                 ob_start(function (string $chunk) use (&$content): string {
                     $content .= $chunk;
 
@@ -65,6 +66,7 @@ class CatalogSearchApiTest extends TestCase
         $this->assertStringContainsString('no-cache', $cacheControl);
         $this->assertStringContainsString('no-transform', $cacheControl);
         $this->assertSame('no', $response->headers->get('X-Accel-Buffering'));
+        $this->assertTrue(Str::isUuid((string) $response->headers->get('X-Correlation-ID')));
 
         $initialBufferLevel = ob_get_level();
         $response->sendContent();
@@ -74,5 +76,95 @@ class CatalogSearchApiTest extends TestCase
 
         $this->assertStringContainsString('event: search_init', $content);
         $this->assertStringContainsString('event: search_done', $content);
+    }
+
+    public function test_validates_limit_boundaries(): void
+    {
+        $mockUihClient = Mockery::mock(UihStreamClient::class);
+        $mockUihClient->shouldReceive('streamSearch')->zeroOrMoreTimes();
+        $this->app->instance(UihStreamClient::class, $mockUihClient);
+
+        // Limit 50 accepted
+        $responseAccepted = $this->postJson('/api/v1/catalog/search', [
+            'search_id' => 's_limit_50',
+            'query' => 'nasi',
+            'limit' => 50,
+        ]);
+        $responseAccepted->assertStatus(200);
+
+        // Limit 51 rejected
+        $responseOver = $this->postJson('/api/v1/catalog/search', [
+            'search_id' => 's_limit_51',
+            'query' => 'nasi',
+            'limit' => 51,
+        ]);
+        $responseOver->assertStatus(422)
+            ->assertJsonValidationErrors(['limit']);
+
+        // Limit 0 rejected
+        $responseUnder = $this->postJson('/api/v1/catalog/search', [
+            'search_id' => 's_limit_0',
+            'query' => 'nasi',
+            'limit' => 0,
+        ]);
+        $responseUnder->assertStatus(422)
+            ->assertJsonValidationErrors(['limit']);
+    }
+
+    public function test_preserves_valid_incoming_correlation_id(): void
+    {
+        $expectedCid = 'a1111111-2222-3333-4444-555555555555';
+        $mockUihClient = Mockery::mock(UihStreamClient::class);
+        $mockUihClient->shouldReceive('streamSearch')
+            ->once()
+            ->with('s_cid_valid', 'nasi', 20, $expectedCid, Mockery::type('callable'));
+        $this->app->instance(UihStreamClient::class, $mockUihClient);
+
+        $response = $this->withHeader('X-Correlation-ID', $expectedCid)
+            ->postJson('/api/v1/catalog/search', [
+                'search_id' => 's_cid_valid',
+                'query' => 'nasi',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertSame($expectedCid, $response->headers->get('X-Correlation-ID'));
+
+        $initialBufferLevel = ob_get_level();
+        $response->sendContent();
+        while (ob_get_level() < $initialBufferLevel) {
+            ob_start();
+        }
+    }
+
+    public function test_replaces_invalid_correlation_id_with_new_uuid(): void
+    {
+        $capturedCid = null;
+        $mockUihClient = Mockery::mock(UihStreamClient::class);
+        $mockUihClient->shouldReceive('streamSearch')
+            ->once()
+            ->with('s_cid_invalid', 'nasi', 20, Mockery::on(function ($cid) use (&$capturedCid) {
+                $capturedCid = $cid;
+
+                return is_string($cid) && Str::isUuid($cid);
+            }), Mockery::type('callable'));
+        $this->app->instance(UihStreamClient::class, $mockUihClient);
+
+        $response = $this->withHeader('X-Correlation-ID', 'not-a-valid-uuid')
+            ->postJson('/api/v1/catalog/search', [
+                'search_id' => 's_cid_invalid',
+                'query' => 'nasi',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertNotSame('not-a-valid-uuid', $response->headers->get('X-Correlation-ID'));
+        $this->assertTrue(Str::isUuid((string) $response->headers->get('X-Correlation-ID')));
+
+        $initialBufferLevel = ob_get_level();
+        $response->sendContent();
+        while (ob_get_level() < $initialBufferLevel) {
+            ob_start();
+        }
+
+        $this->assertSame($capturedCid, $response->headers->get('X-Correlation-ID'));
     }
 }
